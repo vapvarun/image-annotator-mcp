@@ -1,32 +1,76 @@
 # Image Annotator MCP Server
 
-Add markers, arrows, circles, and labels to screenshots. Designed to work alongside Playwright MCP for documentation workflows.
+Professional MCP server for annotating screenshots with markers, arrows, callouts, and more. Works seamlessly with Playwright MCP for documentation workflows.
 
-## Tools
+![Example Annotation](examples/annotated.png)
+
+## Features
+
+- **Multiple Annotation Types**: Markers, arrows, callouts, rectangles, circles, labels, highlights, blur, connectors, and icons
+- **Professional Styling**: Gradient markers with shadows, customizable colors and themes
+- **Theme Support**: Pre-built themes for documentation, tutorials, bug reports, and highlights
+- **6 MCP Tools**: Different tools for different use cases
+
+## Installation
+
+### For Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "image-annotator": {
+      "command": "node",
+      "args": ["/path/to/.mcp-servers/image-annotator/server.js"]
+    }
+  }
+}
+```
+
+### Dependencies
+
+```bash
+cd image-annotator
+npm install
+```
+
+## MCP Tools
 
 ### `annotate_screenshot`
 Add multiple annotations to a screenshot image.
 
 **Annotation Types:**
-- `marker` - Numbered circles (1, 2, 3...)
-- `arrow` - Straight arrows
-- `curved-arrow` - Curved arrows
+- `marker` - Numbered circles (1, 2, 3...) with gradient and shadow
+- `arrow` - Straight arrows with customizable heads
+- `curved-arrow` - Smooth curved arrows
+- `callout` - Text boxes with pointers (speech bubbles)
+- `rect` - Rectangle highlights
 - `circle` - Circle highlights
-- `rect/box` - Rectangle highlights
-- `label/text` - Text labels (with optional background)
+- `label` - Text labels with optional backgrounds
 - `highlight` - Semi-transparent overlays
-- `blur` - Blur sensitive areas
+- `blur` - Blur sensitive content
+- `connector` - Dashed lines between elements
+- `icon` - Icon badges (check, x, warning, info, question)
 
-**Colors:** red, orange, yellow, green, blue, purple, pink, white, black (or hex codes)
+**Themes:** `documentation`, `tutorial`, `bugReport`, `highlight`
+
+**Colors:** red, orange, yellow, green, blue, purple, pink, cyan, teal, white, black, gray, lightGray, darkGray, success, warning, error, info, primary, secondary, accent
 
 ### `get_image_dimensions`
-Get width/height of an image for coordinate calculation.
+Get width, height, and format of an image. Essential for calculating annotation coordinates.
 
 ### `create_step_guide`
-Quick step-by-step guide creation with numbered markers and labels.
+Create a numbered step-by-step guide on a screenshot. Automatically places numbered markers with labels and connecting arrows.
 
-### `highlight_element`
-Simple highlight (circle/rectangle) for a specific area.
+### `highlight_area`
+Quickly highlight a specific area with a shape (circle, rect, highlight) and optional label.
+
+### `add_callout`
+Add a callout (speech bubble) pointing to a specific location.
+
+### `blur_area`
+Blur a rectangular area to hide sensitive information.
 
 ## Usage Example
 
@@ -34,14 +78,17 @@ Simple highlight (circle/rectangle) for a specific area.
 {
   "input_path": "/path/to/screenshot.png",
   "annotations": [
-    {"type": "marker", "x": 100, "y": 100, "number": 1, "color": "red"},
-    {"type": "arrow", "from": [120, 100], "to": [200, 150], "color": "red"},
-    {"type": "label", "x": 210, "y": 155, "text": "Click here!", "background": "white"}
+    {"type": "marker", "x": 100, "y": 100, "number": 1, "color": "primary", "size": 28},
+    {"type": "arrow", "from": [130, 100], "to": [200, 150], "color": "red", "strokeWidth": 3},
+    {"type": "label", "x": 210, "y": 155, "text": "Click here!", "background": "white", "shadow": true},
+    {"type": "callout", "x": 300, "y": 200, "text": "Important!", "pointer": "left", "color": "orange"},
+    {"type": "rect", "x": 50, "y": 250, "width": 200, "height": 100, "color": "green", "style": "dashed"},
+    {"type": "icon", "x": 400, "y": 100, "icon": "check", "color": "success"}
   ]
 }
 ```
 
-## Workflow with Playwright
+## Workflow with Playwright MCP
 
 1. Take screenshot with Playwright: `browser_take_screenshot`
 2. Get dimensions: `get_image_dimensions`
@@ -51,5 +98,17 @@ Simple highlight (circle/rectangle) for a specific area.
 ## CLI Usage
 
 ```bash
-node annotate.js input.png output.png --annotations '[...]'
+# Annotate an image
+node annotate.js input.png output.png --annotations '[{"type":"marker","x":100,"y":100,"number":1}]'
+
+# Get image dimensions
+node annotate.js --dimensions input.png
 ```
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file.
+
+## Author
+
+Varun Dubey <varun@wbcomdesigns.com>
