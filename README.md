@@ -90,10 +90,39 @@ Blur a rectangular area to hide sensitive information.
 
 ## Workflow with Playwright MCP
 
-1. Take screenshot with Playwright: `browser_take_screenshot`
-2. Get dimensions: `get_image_dimensions`
-3. Add annotations: `annotate_screenshot`
-4. Upload to Basecamp: `basecamp_comment_with_file`
+For accurate annotation positioning, use Playwright to get real element coordinates:
+
+### Step 1: Navigate and Screenshot
+```
+browser_navigate → browser_take_screenshot
+```
+
+### Step 2: Get Element Positions
+Use `browser_evaluate` to get bounding boxes:
+```javascript
+() => {
+  const el = document.querySelector('[role="tab"]');
+  const rect = el.getBoundingClientRect();
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+}
+```
+
+### Step 3: Scale for Retina (2x)
+If screenshot is at 2x scale, multiply coordinates by 2.
+
+### Step 4: Annotate with Real Positions
+```json
+{
+  "input_path": "/path/to/screenshot.png",
+  "annotations": [
+    {"type": "marker", "x": 1010, "y": 630, "number": 1, "color": "primary"},
+    {"type": "callout", "x": 1010, "y": 500, "text": "Click here", "pointer": "bottom"}
+  ]
+}
+```
+
+### Step 5: Upload
+Upload annotated image to Basecamp: `basecamp_comment_with_file`
 
 ## CLI Usage
 
