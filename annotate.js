@@ -12,6 +12,11 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 
+// Handwriting-style font stack (system fonts that look hand-drawn)
+// Use single quotes inside for XML compatibility
+const HANDWRITING_FONT = "Comic Sans MS, Marker Felt, Bradley Hand, cursive";
+const CLEAN_FONT = "Arial, Helvetica, sans-serif";
+
 // Professional color palette
 const COLORS = {
   // Primary colors
@@ -44,30 +49,30 @@ const COLORS = {
   accent: '#FF4081'
 };
 
-// Preset themes for different use cases
+// Preset themes for different use cases (bolder defaults)
 const THEMES = {
   documentation: {
-    marker: { color: 'primary', size: 28 },
-    arrow: { color: 'primary', strokeWidth: 3 },
-    label: { color: 'primary', fontSize: 18, background: 'white' },
+    marker: { color: 'primary', size: 32 },
+    arrow: { color: 'primary', strokeWidth: 5 },
+    label: { color: 'primary', fontSize: 20, background: 'white', handwriting: true },
     callout: { color: 'primary', background: 'white' }
   },
   tutorial: {
-    marker: { color: 'green', size: 32 },
-    arrow: { color: 'green', strokeWidth: 4 },
-    label: { color: 'darkGray', fontSize: 20, background: 'lightGray' },
+    marker: { color: 'green', size: 36 },
+    arrow: { color: 'green', strokeWidth: 6 },
+    label: { color: 'darkGray', fontSize: 22, background: 'lightGray', handwriting: true },
     callout: { color: 'green', background: 'white' }
   },
   bugReport: {
-    marker: { color: 'error', size: 28 },
-    arrow: { color: 'error', strokeWidth: 3 },
-    label: { color: 'error', fontSize: 18, background: 'white' },
+    marker: { color: 'error', size: 32 },
+    arrow: { color: 'error', strokeWidth: 5 },
+    label: { color: 'error', fontSize: 20, background: 'white', handwriting: true },
     callout: { color: 'error', background: 'white' }
   },
   highlight: {
-    marker: { color: 'warning', size: 28 },
-    arrow: { color: 'warning', strokeWidth: 3 },
-    label: { color: 'darkGray', fontSize: 18, background: 'yellow' },
+    marker: { color: 'warning', size: 32 },
+    arrow: { color: 'warning', strokeWidth: 5 },
+    label: { color: 'darkGray', fontSize: 20, background: 'yellow', handwriting: true },
     callout: { color: 'warning', background: 'yellow' }
   }
 };
@@ -114,7 +119,7 @@ function createDropShadow(id, blur = 4, opacity = 0.3) {
 /**
  * Create professional numbered marker with shadow and gradient
  */
-function createMarker({ x, y, number, color = 'red', size = 28, shadow = true, style = 'filled' }) {
+function createMarker({ x, y, number, color = 'red', size = 32, shadow = true, style = 'filled' }) {
   const c = getColor(color);
   const id = generateId('marker');
   const defs = [];
@@ -169,9 +174,9 @@ function createMarker({ x, y, number, color = 'red', size = 28, shadow = true, s
 }
 
 /**
- * Create professional arrow with arrowhead
+ * Create professional arrow with arrowhead (bolder, rounded)
  */
-function createArrow({ from, to, color = 'red', strokeWidth = 3, style = 'solid', headStyle = 'filled', shadow = true }) {
+function createArrow({ from, to, color = 'red', strokeWidth = 5, style = 'solid', headStyle = 'filled', shadow = true }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
@@ -207,7 +212,7 @@ function createArrow({ from, to, color = 'red', strokeWidth = 3, style = 'solid'
 
   const element = `
     <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-          stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round"
+          stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"
           marker-end="url(#${id}-head)" ${dashArray} ${filterAttr}/>
   `;
 
@@ -215,9 +220,9 @@ function createArrow({ from, to, color = 'red', strokeWidth = 3, style = 'solid'
 }
 
 /**
- * Create curved arrow with smooth bezier curve
+ * Create curved arrow with smooth bezier curve (bolder, rounded)
  */
-function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 3, headStyle = 'filled', shadow = true }) {
+function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 5, headStyle = 'filled', shadow = true }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
@@ -253,7 +258,7 @@ function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 
 
   const element = `
     <path d="M${x1},${y1} Q${cx},${cy} ${x2},${y2}"
-          fill="none" stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round"
+          fill="none" stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"
           marker-end="url(#${id}-head)" ${filterAttr}/>
   `;
 
@@ -261,19 +266,20 @@ function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 
 }
 
 /**
- * Create professional callout box with pointer
+ * Create professional callout box with pointer (rounded corners, handwriting font)
  */
-function createCallout({ x, y, text, color = 'primary', background = 'white', width = null, pointer = 'bottom', fontSize = 16, shadow = true }) {
+function createCallout({ x, y, text, color = 'primary', background = 'white', width = null, pointer = 'bottom', fontSize = 18, shadow = true, handwriting = true }) {
   const borderColor = getColor(color);
   const bgColor = getColor(background);
   const id = generateId('callout');
   const defs = [];
+  const fontFamily = handwriting ? HANDWRITING_FONT : CLEAN_FONT;
 
   // Calculate dimensions
-  const padding = 12;
-  const lineHeight = fontSize * 1.4;
+  const padding = 14;
+  const lineHeight = fontSize * 1.5;
   const lines = text.split('\n');
-  const textWidth = width || Math.max(...lines.map(l => l.length * fontSize * 0.6)) + padding * 2;
+  const textWidth = width || Math.max(...lines.map(l => l.length * fontSize * 0.65)) + padding * 2;
   const textHeight = lines.length * lineHeight + padding * 2;
 
   // Add drop shadow
@@ -322,10 +328,10 @@ function createCallout({ x, y, text, color = 'primary', background = 'white', wi
   const element = `
     <g ${filterAttr}>
       <rect x="${boxX}" y="${boxY}" width="${textWidth}" height="${textHeight}"
-            rx="6" fill="${bgColor}" stroke="${borderColor}" stroke-width="2"/>
-      ${pointerPath ? `<path d="${pointerPath}" fill="${bgColor}" stroke="${borderColor}" stroke-width="2"/>` : ''}
+            rx="10" fill="${bgColor}" stroke="${borderColor}" stroke-width="3" stroke-linejoin="round"/>
+      ${pointerPath ? `<path d="${pointerPath}" fill="${bgColor}" stroke="${borderColor}" stroke-width="3" stroke-linejoin="round"/>` : ''}
       <text x="${boxX + padding}" y="${boxY + padding + fontSize}"
-            fill="${getColor('darkGray')}" font-size="${fontSize}" font-family="Arial, Helvetica, sans-serif">
+            fill="${getColor('darkGray')}" font-size="${fontSize}" font-family="${fontFamily}" font-weight="600">
         ${textElements}
       </text>
     </g>
@@ -335,9 +341,9 @@ function createCallout({ x, y, text, color = 'primary', background = 'white', wi
 }
 
 /**
- * Create rectangle/box highlight
+ * Create rectangle/box highlight (rounded corners)
  */
-function createRect({ x, y, width, height, color = 'red', strokeWidth = 3, fill = 'none', cornerRadius = 8, style = 'solid', shadow = false }) {
+function createRect({ x, y, width, height, color = 'red', strokeWidth = 4, fill = 'none', cornerRadius = 12, style = 'solid', shadow = false }) {
   const c = getColor(color);
   const fillColor = fill === 'none' ? 'none' : getColor(fill);
   const id = generateId('rect');
@@ -347,21 +353,21 @@ function createRect({ x, y, width, height, color = 'red', strokeWidth = 3, fill 
     defs.push(createDropShadow(`${id}-shadow`));
   }
 
-  const dashArray = style === 'dashed' ? 'stroke-dasharray="10,5"' : '';
+  const dashArray = style === 'dashed' ? 'stroke-dasharray="12,6"' : '';
   const filterAttr = shadow ? `filter="url(#${id}-shadow)"` : '';
 
   const element = `
     <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${cornerRadius}"
-          fill="${fillColor}" stroke="${c}" stroke-width="${strokeWidth}" ${dashArray} ${filterAttr}/>
+          fill="${fillColor}" stroke="${c}" stroke-width="${strokeWidth}" stroke-linejoin="round" ${dashArray} ${filterAttr}/>
   `;
 
   return { defs: defs.join('\n'), element };
 }
 
 /**
- * Create circle highlight
+ * Create circle highlight (bolder)
  */
-function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 3, fill = 'none', style = 'solid', shadow = false }) {
+function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 4, fill = 'none', style = 'solid', shadow = false }) {
   const c = getColor(color);
   const fillColor = fill === 'none' ? 'none' : getColor(fill);
   const id = generateId('circle');
@@ -383,20 +389,21 @@ function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 3, fill 
 }
 
 /**
- * Create text label with optional background
+ * Create text label with optional background (handwriting font support)
  */
-function createLabel({ x, y, text, color = 'darkGray', fontSize = 16, fontWeight = 'bold', background = null, padding = 8, cornerRadius = 4, shadow = false }) {
+function createLabel({ x, y, text, color = 'darkGray', fontSize = 18, fontWeight = '600', background = null, padding = 10, cornerRadius = 8, shadow = true, handwriting = true }) {
   const textColor = getColor(color);
   const id = generateId('label');
   const defs = [];
   const elements = [];
+  const fontFamily = handwriting ? HANDWRITING_FONT : CLEAN_FONT;
 
-  // Calculate text dimensions
-  const textWidth = text.length * fontSize * 0.6;
-  const textHeight = fontSize * 1.2;
+  // Calculate text dimensions (slightly larger for handwriting font)
+  const textWidth = text.length * fontSize * 0.65;
+  const textHeight = fontSize * 1.3;
 
   if (shadow && background) {
-    defs.push(createDropShadow(`${id}-shadow`, 3, 0.15));
+    defs.push(createDropShadow(`${id}-shadow`, 4, 0.2));
   }
 
   const filterAttr = (shadow && background) ? `filter="url(#${id}-shadow)"` : '';
@@ -406,13 +413,13 @@ function createLabel({ x, y, text, color = 'darkGray', fontSize = 16, fontWeight
     elements.push(`
       <rect x="${x - padding}" y="${y - textHeight - padding + 4}"
             width="${textWidth + padding * 2}" height="${textHeight + padding * 2}"
-            rx="${cornerRadius}" fill="${bgColor}" ${filterAttr}/>
+            rx="${cornerRadius}" fill="${bgColor}" stroke="${textColor}" stroke-width="2" stroke-linejoin="round" ${filterAttr}/>
     `);
   }
 
   elements.push(`
     <text x="${x}" y="${y}" fill="${textColor}" font-size="${fontSize}"
-          font-weight="${fontWeight}" font-family="Arial, Helvetica, sans-serif">${escapeXml(text)}</text>
+          font-weight="${fontWeight}" font-family="${fontFamily}">${escapeXml(text)}</text>
   `);
 
   return { defs: defs.join('\n'), element: elements.join('\n') };
@@ -445,24 +452,24 @@ function createBlur({ x, y, width, height, intensity = 8 }) {
 }
 
 /**
- * Create step connector line between two points
+ * Create step connector line between two points (bolder, rounded)
  */
-function createConnector({ from, to, color = 'gray', strokeWidth = 2, style = 'dashed' }) {
+function createConnector({ from, to, color = 'gray', strokeWidth = 3, style = 'dashed' }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
-  const dashArray = style === 'dashed' ? 'stroke-dasharray="6,4"' : '';
+  const dashArray = style === 'dashed' ? 'stroke-dasharray="8,5"' : '';
 
   return {
     defs: '',
-    element: `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${strokeWidth}" ${dashArray}/>`
+    element: `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round" ${dashArray}/>`
   };
 }
 
 /**
- * Create icon badge (checkmark, x, warning, info)
+ * Create icon badge (checkmark, x, warning, info) - bolder strokes
  */
-function createIcon({ x, y, icon, color = 'green', size = 24, shadow = true }) {
+function createIcon({ x, y, icon, color = 'green', size = 28, shadow = true }) {
   const c = getColor(color);
   const id = generateId('icon');
   const defs = [];
@@ -478,27 +485,27 @@ function createIcon({ x, y, icon, color = 'green', size = 24, shadow = true }) {
     case 'check':
     case 'checkmark':
       iconPath = `<path d="M${x - size * 0.3},${y} L${x - size * 0.1},${y + size * 0.25} L${x + size * 0.35},${y - size * 0.25}"
-                       fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+                       fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
       break;
     case 'x':
     case 'cross':
       iconPath = `
-        <line x1="${x - size * 0.2}" y1="${y - size * 0.2}" x2="${x + size * 0.2}" y2="${y + size * 0.2}" stroke="white" stroke-width="3" stroke-linecap="round"/>
-        <line x1="${x + size * 0.2}" y1="${y - size * 0.2}" x2="${x - size * 0.2}" y2="${y + size * 0.2}" stroke="white" stroke-width="3" stroke-linecap="round"/>
+        <line x1="${x - size * 0.2}" y1="${y - size * 0.2}" x2="${x + size * 0.2}" y2="${y + size * 0.2}" stroke="white" stroke-width="4" stroke-linecap="round"/>
+        <line x1="${x + size * 0.2}" y1="${y - size * 0.2}" x2="${x - size * 0.2}" y2="${y + size * 0.2}" stroke="white" stroke-width="4" stroke-linecap="round"/>
       `;
       break;
     case 'warning':
     case '!':
       iconPath = `
-        <line x1="${x}" y1="${y - size * 0.15}" x2="${x}" y2="${y + size * 0.05}" stroke="white" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="${x}" cy="${y + size * 0.25}" r="2" fill="white"/>
+        <line x1="${x}" y1="${y - size * 0.15}" x2="${x}" y2="${y + size * 0.05}" stroke="white" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="${x}" cy="${y + size * 0.25}" r="3" fill="white"/>
       `;
       break;
     case 'info':
     case 'i':
       iconPath = `
-        <circle cx="${x}" cy="${y - size * 0.2}" r="2" fill="white"/>
-        <line x1="${x}" y1="${y - size * 0.05}" x2="${x}" y2="${y + size * 0.25}" stroke="white" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="${x}" cy="${y - size * 0.2}" r="3" fill="white"/>
+        <line x1="${x}" y1="${y - size * 0.05}" x2="${x}" y2="${y + size * 0.25}" stroke="white" stroke-width="4" stroke-linecap="round"/>
       `;
       break;
     case 'question':
@@ -507,8 +514,8 @@ function createIcon({ x, y, icon, color = 'green', size = 24, shadow = true }) {
         <path d="M${x - size * 0.15},${y - size * 0.25} Q${x - size * 0.15},${y - size * 0.4} ${x},${y - size * 0.4}
                 Q${x + size * 0.2},${y - size * 0.4} ${x + size * 0.2},${y - size * 0.2}
                 Q${x + size * 0.2},${y - size * 0.05} ${x},${y}"
-              fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-        <circle cx="${x}" cy="${y + size * 0.2}" r="2" fill="white"/>
+              fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+        <circle cx="${x}" cy="${y + size * 0.2}" r="3" fill="white"/>
       `;
       break;
     default:
