@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test outputs
+*.test.png
+*-annotated.png
+*-guide.png
+*-highlighted.png
+*-callout.png
+*-blurred.png
+
+# Build artifacts
+dist/
+build/
+*.tgz

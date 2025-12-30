@@ -1,0 +1,46 @@
+{
+  "name": "image-annotator-mcp",
+  "version": "1.0.0",
+  "description": "Professional MCP server for annotating screenshots with markers, arrows, callouts, and more. Works seamlessly with Playwright MCP for documentation workflows.",
+  "main": "server.js",
+  "bin": {
+    "image-annotator": "./server.js",
+    "annotate": "./annotate.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "cli": "node annotate.js",
+    "test": "node annotate.js --help"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "screenshot",
+    "annotation",
+    "documentation",
+    "playwright",
+    "image",
+    "marker",
+    "arrow",
+    "callout",
+    "highlight",
+    "tutorial"
+  ],
+  "author": "Varun Dubey <varun@wbcomdesigns.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vapvarun/image-annotator-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vapvarun/image-annotator-mcp/issues"
+  },
+  "homepage": "https://github.com/vapvarun/image-annotator-mcp#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "sharp": "^0.34.5"
+  }
+}
