@@ -2,7 +2,7 @@
 
 Professional MCP server for annotating screenshots with markers, arrows, callouts, and more. Works seamlessly with Playwright MCP for documentation workflows.
 
-![Example Annotation](examples/annotated.png)
+![Example Annotation](examples/annotated.png?v=2)
 
 ## Features
 
