@@ -12,10 +12,23 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 
-// Handwriting-style font stack (system fonts that look hand-drawn)
-// Use single quotes inside for XML compatibility
-const HANDWRITING_FONT = "Comic Sans MS, Marker Felt, Bradley Hand, cursive";
-const CLEAN_FONT = "Arial, Helvetica, sans-serif";
+// Clean, professional font stack — the default for all product documentation.
+// Resolves to SF Pro (macOS) / Segoe UI (Windows) / Roboto (Linux) / Helvetica.
+// Use single quotes inside for XML compatibility.
+const CLEAN_FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif";
+// Optional casual font — OFF by default. Not recommended for premium docs.
+const HANDWRITING_FONT = "'Marker Felt', 'Bradley Hand', 'Comic Sans MS', cursive";
+
+/**
+ * Compute an automatic annotation scale from the image width so that
+ * decorative elements (markers, stroke widths, label text) stay proportional
+ * on high-DPI / retina screenshots instead of rendering tiny.
+ * Baseline 2400px ≈ a 1200pt screen captured at 2x. Clamped to [1, 2.5].
+ */
+function computeScale(width, baseline = 2400) {
+  const s = (width || baseline) / baseline;
+  return Math.min(2.5, Math.max(1, Math.round(s * 100) / 100));
+}
 
 // Professional color palette
 const COLORS = {
@@ -54,25 +67,25 @@ const THEMES = {
   documentation: {
     marker: { color: 'primary', size: 32 },
     arrow: { color: 'primary', strokeWidth: 5 },
-    label: { color: 'primary', fontSize: 20, background: 'white', handwriting: true },
+    label: { color: 'primary', fontSize: 20, background: 'white' },
     callout: { color: 'primary', background: 'white' }
   },
   tutorial: {
     marker: { color: 'green', size: 36 },
     arrow: { color: 'green', strokeWidth: 6 },
-    label: { color: 'darkGray', fontSize: 22, background: 'lightGray', handwriting: true },
+    label: { color: 'darkGray', fontSize: 22, background: 'lightGray' },
     callout: { color: 'green', background: 'white' }
   },
   bugReport: {
     marker: { color: 'error', size: 32 },
     arrow: { color: 'error', strokeWidth: 5 },
-    label: { color: 'error', fontSize: 20, background: 'white', handwriting: true },
+    label: { color: 'error', fontSize: 20, background: 'white' },
     callout: { color: 'error', background: 'white' }
   },
   highlight: {
     marker: { color: 'warning', size: 32 },
     arrow: { color: 'warning', strokeWidth: 5 },
-    label: { color: 'darkGray', fontSize: 20, background: 'yellow', handwriting: true },
+    label: { color: 'darkGray', fontSize: 20, background: 'yellow' },
     callout: { color: 'warning', background: 'yellow' }
   }
 };
@@ -119,11 +132,23 @@ function createDropShadow(id, blur = 4, opacity = 0.3) {
 /**
  * Create professional numbered marker with shadow and gradient
  */
-function createMarker({ x, y, number, color = 'red', size = 32, shadow = true, style = 'filled' }) {
+function createMarker({ x, y, number, color = 'red', size = 32, shadow = true, style = 'filled', scale = 1, target = null, offset = null, leader = true }) {
   const c = getColor(color);
   const id = generateId('marker');
   const defs = [];
   const elements = [];
+  const s = size * scale;
+
+  // Resolve marker position. When a `target` is supplied, the marker sits in a
+  // clear area (target + offset) and a leader points to the real UI element, so
+  // the number never covers the thing it documents.
+  let mx = x;
+  let my = y;
+  if (target && (mx == null || my == null)) {
+    const off = offset || [-(s + 22 * scale), -(s + 22 * scale)];
+    mx = target[0] + off[0];
+    my = target[1] + off[1];
+  }
 
   // Add drop shadow
   if (shadow) {
@@ -142,31 +167,49 @@ function createMarker({ x, y, number, color = 'red', size = 32, shadow = true, s
 
   const filterAttr = shadow ? `filter="url(#${id}-shadow)"` : '';
 
+  // Leader line from the marker edge to the target (drawn first, under the badge)
+  if (target && leader) {
+    const [tx, ty] = target;
+    const dx = tx - mx;
+    const dy = ty - my;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const startX = mx + ux * s;
+    const startY = my + uy * s;
+    const endX = tx - ux * 8 * scale;
+    const endY = ty - uy * 8 * scale;
+    const lw = Math.max(2, 2.2 * scale);
+    elements.push(`<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}"
+          stroke="${c}" stroke-width="${lw}" stroke-linecap="round"/>`);
+    elements.push(`<circle cx="${tx}" cy="${ty}" r="${Math.max(3, 3.5 * scale)}" fill="${c}"/>`);
+  }
+
   if (style === 'filled') {
     // Filled circle with number
     elements.push(`
-      <circle cx="${x}" cy="${y}" r="${size}" fill="url(#${gradientId})" ${filterAttr}/>
-      <circle cx="${x}" cy="${y}" r="${size - 2}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
-      <text x="${x}" y="${y + size * 0.35}" text-anchor="middle" fill="white"
-            font-size="${size * 0.9}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${number}</text>
+      <circle cx="${mx}" cy="${my}" r="${s}" fill="url(#${gradientId})" ${filterAttr}/>
+      <circle cx="${mx}" cy="${my}" r="${s - 2 * scale}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="${2 * scale}"/>
+      <text x="${mx}" y="${my + s * 0.35}" text-anchor="middle" fill="white"
+            font-size="${s * 0.9}" font-weight="bold" font-family="${CLEAN_FONT}">${number}</text>
     `);
   } else if (style === 'outline') {
     // Outlined circle with number
     elements.push(`
-      <circle cx="${x}" cy="${y}" r="${size}" fill="white" stroke="${c}" stroke-width="3" ${filterAttr}/>
-      <text x="${x}" y="${y + size * 0.35}" text-anchor="middle" fill="${c}"
-            font-size="${size * 0.9}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${number}</text>
+      <circle cx="${mx}" cy="${my}" r="${s}" fill="white" stroke="${c}" stroke-width="${3 * scale}" ${filterAttr}/>
+      <text x="${mx}" y="${my + s * 0.35}" text-anchor="middle" fill="${c}"
+            font-size="${s * 0.9}" font-weight="bold" font-family="${CLEAN_FONT}">${number}</text>
     `);
   } else if (style === 'badge') {
     // Badge style (pill shape for multi-digit)
     const isMultiDigit = number > 9;
-    const width = isMultiDigit ? size * 1.6 : size * 2;
-    const height = size * 2;
+    const width = isMultiDigit ? s * 1.6 : s * 2;
+    const height = s * 2;
     elements.push(`
-      <rect x="${x - width / 2}" y="${y - height / 2}" width="${width}" height="${height}"
+      <rect x="${mx - width / 2}" y="${my - height / 2}" width="${width}" height="${height}"
             rx="${height / 2}" fill="url(#${gradientId})" ${filterAttr}/>
-      <text x="${x}" y="${y + size * 0.35}" text-anchor="middle" fill="white"
-            font-size="${size * 0.9}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${number}</text>
+      <text x="${mx}" y="${my + s * 0.35}" text-anchor="middle" fill="white"
+            font-size="${s * 0.9}" font-weight="bold" font-family="${CLEAN_FONT}">${number}</text>
     `);
   }
 
@@ -176,12 +219,13 @@ function createMarker({ x, y, number, color = 'red', size = 32, shadow = true, s
 /**
  * Create professional arrow with arrowhead (bolder, rounded)
  */
-function createArrow({ from, to, color = 'red', strokeWidth = 5, style = 'solid', headStyle = 'filled', shadow = true }) {
+function createArrow({ from, to, color = 'red', strokeWidth = 5, style = 'solid', headStyle = 'filled', shadow = true, scale = 1 }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
   const id = generateId('arrow');
   const defs = [];
+  strokeWidth = strokeWidth * scale;
 
   // Add drop shadow
   if (shadow) {
@@ -222,12 +266,13 @@ function createArrow({ from, to, color = 'red', strokeWidth = 5, style = 'solid'
 /**
  * Create curved arrow with smooth bezier curve (bolder, rounded)
  */
-function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 5, headStyle = 'filled', shadow = true }) {
+function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 5, headStyle = 'filled', shadow = true, scale = 1 }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
   const id = generateId('curved-arrow');
   const defs = [];
+  strokeWidth = strokeWidth * scale;
 
   // Calculate control point
   const midX = (x1 + x2) / 2;
@@ -268,19 +313,21 @@ function createCurvedArrow({ from, to, curve = 50, color = 'red', strokeWidth = 
 /**
  * Create professional callout box with pointer (rounded corners, handwriting font)
  */
-function createCallout({ x, y, text, color = 'primary', background = 'white', width = null, pointer = 'bottom', fontSize = 18, shadow = true, handwriting = true }) {
+function createCallout({ x, y, text, color = 'primary', background = 'white', width = null, pointer = 'bottom', fontSize = 18, shadow = true, handwriting = false, scale = 1 }) {
   const borderColor = getColor(color);
   const bgColor = getColor(background);
   const id = generateId('callout');
   const defs = [];
   const fontFamily = handwriting ? HANDWRITING_FONT : CLEAN_FONT;
+  const fs = fontSize * scale;
 
   // Calculate dimensions
-  const padding = 14;
-  const lineHeight = fontSize * 1.5;
+  const padding = 14 * scale;
+  const lineHeight = fs * 1.5;
   const lines = text.split('\n');
-  const textWidth = width || Math.max(...lines.map(l => l.length * fontSize * 0.65)) + padding * 2;
+  const textWidth = width || Math.max(...lines.map(l => l.length * fs * 0.6)) + padding * 2;
   const textHeight = lines.length * lineHeight + padding * 2;
+  const strokeW = 3 * scale;
 
   // Add drop shadow
   if (shadow) {
@@ -291,7 +338,7 @@ function createCallout({ x, y, text, color = 'primary', background = 'white', wi
 
   // Calculate box position based on pointer
   let boxX, boxY, pointerPath;
-  const pointerSize = 12;
+  const pointerSize = 12 * scale;
 
   switch (pointer) {
     case 'top':
@@ -328,10 +375,10 @@ function createCallout({ x, y, text, color = 'primary', background = 'white', wi
   const element = `
     <g ${filterAttr}>
       <rect x="${boxX}" y="${boxY}" width="${textWidth}" height="${textHeight}"
-            rx="10" fill="${bgColor}" stroke="${borderColor}" stroke-width="3" stroke-linejoin="round"/>
-      ${pointerPath ? `<path d="${pointerPath}" fill="${bgColor}" stroke="${borderColor}" stroke-width="3" stroke-linejoin="round"/>` : ''}
-      <text x="${boxX + padding}" y="${boxY + padding + fontSize}"
-            fill="${getColor('darkGray')}" font-size="${fontSize}" font-family="${fontFamily}" font-weight="600">
+            rx="${10 * scale}" fill="${bgColor}" stroke="${borderColor}" stroke-width="${strokeW}" stroke-linejoin="round"/>
+      ${pointerPath ? `<path d="${pointerPath}" fill="${bgColor}" stroke="${borderColor}" stroke-width="${strokeW}" stroke-linejoin="round"/>` : ''}
+      <text x="${boxX + padding}" y="${boxY + padding + fs}"
+            fill="${getColor('darkGray')}" font-size="${fs}" font-family="${fontFamily}" font-weight="600">
         ${textElements}
       </text>
     </g>
@@ -343,11 +390,12 @@ function createCallout({ x, y, text, color = 'primary', background = 'white', wi
 /**
  * Create rectangle/box highlight (rounded corners)
  */
-function createRect({ x, y, width, height, color = 'red', strokeWidth = 4, fill = 'none', cornerRadius = 12, style = 'solid', shadow = false }) {
+function createRect({ x, y, width, height, color = 'red', strokeWidth = 4, fill = 'none', cornerRadius = 12, style = 'solid', shadow = false, scale = 1 }) {
   const c = getColor(color);
   const fillColor = fill === 'none' ? 'none' : getColor(fill);
   const id = generateId('rect');
   const defs = [];
+  strokeWidth = strokeWidth * scale;
 
   if (shadow) {
     defs.push(createDropShadow(`${id}-shadow`));
@@ -367,11 +415,12 @@ function createRect({ x, y, width, height, color = 'red', strokeWidth = 4, fill 
 /**
  * Create circle highlight (bolder)
  */
-function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 4, fill = 'none', style = 'solid', shadow = false }) {
+function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 4, fill = 'none', style = 'solid', shadow = false, scale = 1 }) {
   const c = getColor(color);
   const fillColor = fill === 'none' ? 'none' : getColor(fill);
   const id = generateId('circle');
   const defs = [];
+  strokeWidth = strokeWidth * scale;
 
   if (shadow) {
     defs.push(createDropShadow(`${id}-shadow`));
@@ -391,16 +440,18 @@ function createCircle({ x, y, radius = 30, color = 'red', strokeWidth = 4, fill 
 /**
  * Create text label with optional background (handwriting font support)
  */
-function createLabel({ x, y, text, color = 'darkGray', fontSize = 18, fontWeight = '600', background = null, padding = 10, cornerRadius = 8, shadow = true, handwriting = true }) {
+function createLabel({ x, y, text, color = 'darkGray', fontSize = 18, fontWeight = '600', background = null, padding = 10, cornerRadius = 8, shadow = true, handwriting = false, scale = 1 }) {
   const textColor = getColor(color);
   const id = generateId('label');
   const defs = [];
   const elements = [];
   const fontFamily = handwriting ? HANDWRITING_FONT : CLEAN_FONT;
+  const fs = fontSize * scale;
+  const pad = padding * scale;
 
-  // Calculate text dimensions (slightly larger for handwriting font)
-  const textWidth = text.length * fontSize * 0.65;
-  const textHeight = fontSize * 1.3;
+  // Calculate text dimensions
+  const textWidth = text.length * fs * 0.6;
+  const textHeight = fs * 1.3;
 
   if (shadow && background) {
     defs.push(createDropShadow(`${id}-shadow`, 4, 0.2));
@@ -411,15 +462,21 @@ function createLabel({ x, y, text, color = 'darkGray', fontSize = 18, fontWeight
   if (background) {
     const bgColor = getColor(background);
     elements.push(`
-      <rect x="${x - padding}" y="${y - textHeight - padding + 4}"
-            width="${textWidth + padding * 2}" height="${textHeight + padding * 2}"
-            rx="${cornerRadius}" fill="${bgColor}" stroke="${textColor}" stroke-width="2" stroke-linejoin="round" ${filterAttr}/>
+      <rect x="${x - pad}" y="${y - textHeight - pad + 4 * scale}"
+            width="${textWidth + pad * 2}" height="${textHeight + pad * 2}"
+            rx="${cornerRadius * scale}" fill="${bgColor}" stroke="${textColor}" stroke-width="${2 * scale}" stroke-linejoin="round" ${filterAttr}/>
     `);
   }
 
+  // Without a backing plate, paint a subtle white halo so the text stays
+  // legible over arbitrary screenshot pixels (paint-order: stroke under fill).
+  const haloAttr = background
+    ? ''
+    : `stroke="white" stroke-width="${Math.max(2, 3 * scale)}" stroke-linejoin="round" paint-order="stroke"`;
+
   elements.push(`
-    <text x="${x}" y="${y}" fill="${textColor}" font-size="${fontSize}"
-          font-weight="${fontWeight}" font-family="${fontFamily}">${escapeXml(text)}</text>
+    <text x="${x}" y="${y}" fill="${textColor}" font-size="${fs}"
+          font-weight="${fontWeight}" font-family="${fontFamily}" ${haloAttr}>${escapeXml(text)}</text>
   `);
 
   return { defs: defs.join('\n'), element: elements.join('\n') };
@@ -454,10 +511,11 @@ function createBlur({ x, y, width, height, intensity = 8 }) {
 /**
  * Create step connector line between two points (bolder, rounded)
  */
-function createConnector({ from, to, color = 'gray', strokeWidth = 3, style = 'dashed' }) {
+function createConnector({ from, to, color = 'gray', strokeWidth = 3, style = 'dashed', scale = 1 }) {
   const c = getColor(color);
   const [x1, y1] = from;
   const [x2, y2] = to;
+  strokeWidth = strokeWidth * scale;
   const dashArray = style === 'dashed' ? 'stroke-dasharray="8,5"' : '';
 
   return {
@@ -469,10 +527,11 @@ function createConnector({ from, to, color = 'gray', strokeWidth = 3, style = 'd
 /**
  * Create icon badge (checkmark, x, warning, info) - bolder strokes
  */
-function createIcon({ x, y, icon, color = 'green', size = 28, shadow = true }) {
+function createIcon({ x, y, icon, color = 'green', size = 28, shadow = true, scale = 1 }) {
   const c = getColor(color);
   const id = generateId('icon');
   const defs = [];
+  size = size * scale;
 
   if (shadow) {
     defs.push(createDropShadow(`${id}-shadow`));
@@ -534,6 +593,53 @@ function createIcon({ x, y, icon, color = 'green', size = 28, shadow = true }) {
 }
 
 /**
+ * Create a spotlight: dim the whole screenshot and cut a soft hole around the
+ * target so the reader's eye lands exactly where you want. Place this FIRST in
+ * the annotations array so markers/labels render on top of the dimmed area.
+ *
+ * Geometry: pass `target: [x,y]` (+ optional radius/width/height) for a centered
+ * hole, or x/y/width/height (top-left rect, like the rect annotation).
+ */
+function createSpotlight({ target, x, y, width, height, radius, shape = 'rect', dim = 0.6, color = '#0B1020', padding = 18, cornerRadius = 14, feather = 10, scale = 1 }) {
+  const id = generateId('spotlight');
+  const c = getColor(color);
+  const pad = padding * scale;
+  const fr = Math.max(0.1, feather * scale);
+
+  let cx = x;
+  let cy = y;
+  if (target) { cx = target[0]; cy = target[1]; }
+
+  let hole;
+  if (shape === 'ellipse' || shape === 'circle') {
+    const rx = (radius != null ? radius : (width || 90) / 2) + pad;
+    const ry = (radius != null ? radius : (height || width || 90) / 2) + pad;
+    hole = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="black"/>`;
+  } else {
+    // Rectangle hole. With `target`, center it; otherwise treat x/y as top-left.
+    const w = (width || 140) + pad * 2;
+    const h = (height || 70) + pad * 2;
+    const left = target ? cx - w / 2 : (x != null ? x - pad : cx - w / 2);
+    const top = target ? cy - h / 2 : (y != null ? y - pad : cy - h / 2);
+    hole = `<rect x="${left}" y="${top}" width="${w}" height="${h}" rx="${cornerRadius * scale}" fill="black"/>`;
+  }
+
+  const maskId = `${id}-mask`;
+  // A huge rect covers the whole canvas regardless of image size; the blurred
+  // black hole subtracts the spotlight area from the dim overlay.
+  const cover = `x="-99999" y="-99999" width="999999" height="999999"`;
+  const defs = `
+    <filter id="${id}-feather"><feGaussianBlur stdDeviation="${fr}"/></filter>
+    <mask id="${maskId}">
+      <rect ${cover} fill="white"/>
+      <g filter="url(#${id}-feather)">${hole}</g>
+    </mask>`;
+  const element = `<rect ${cover} fill="${c}" opacity="${dim}" mask="url(#${maskId})"/>`;
+
+  return { defs, element };
+}
+
+/**
  * Adjust color brightness
  */
 function adjustColor(hex, amount) {
@@ -547,10 +653,12 @@ function adjustColor(hex, amount) {
 /**
  * Build complete SVG from annotations
  */
-function buildSvg(width, height, annotations, theme = null) {
+function buildSvg(width, height, annotations, theme = null, opts = {}) {
   // Reset ID counter for each build
   idCounter = 0;
 
+  const scale = opts.scale != null ? opts.scale : 1;
+  const margin = opts.margin || 0;
   const defs = [];
   const elements = [];
 
@@ -558,10 +666,13 @@ function buildSvg(width, height, annotations, theme = null) {
   const themeDefaults = theme ? THEMES[theme] : null;
 
   for (const ann of annotations) {
-    // Merge with theme defaults
-    const mergedAnn = themeDefaults && themeDefaults[ann.type]
-      ? { ...themeDefaults[ann.type], ...ann }
-      : ann;
+    // Merge with theme defaults, then inject the global scale (a per-annotation
+    // `scale` still wins so callers can fine-tune an individual element).
+    const mergedAnn = {
+      scale,
+      ...(themeDefaults && themeDefaults[ann.type] ? themeDefaults[ann.type] : {}),
+      ...ann
+    };
 
     let result;
 
@@ -605,6 +716,10 @@ function buildSvg(width, height, annotations, theme = null) {
       case 'icon':
         result = createIcon(mergedAnn);
         break;
+      case 'spotlight':
+      case 'focus':
+        result = createSpotlight(mergedAnn);
+        break;
       default:
         console.warn(`Unknown annotation type: ${ann.type}`);
         continue;
@@ -616,12 +731,20 @@ function buildSvg(width, height, annotations, theme = null) {
     }
   }
 
+  // When a margin is added the underlying image is padded by `margin` on every
+  // side, so shift annotations inward to keep the caller's coordinates (which
+  // are in original-image space) aligned with the padded screenshot.
+  const inner = elements.join('\n');
+  const body = margin > 0
+    ? `<g transform="translate(${margin},${margin})">${inner}</g>`
+    : inner;
+
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${width + margin * 2}" height="${height + margin * 2}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     ${defs.join('\n')}
   </defs>
-  ${elements.join('\n')}
+  ${body}
 </svg>`;
 }
 
@@ -638,24 +761,141 @@ async function annotateImage(inputPath, outputPath, annotations, options = {}) {
   const metadata = await sharp(inputPath).metadata();
   const { width, height } = metadata;
 
-  // Build SVG overlay
-  const svg = buildSvg(width, height, annotations, options.theme);
+  // Auto-scale annotations to the image resolution unless the caller overrides.
+  const scale = options.scale != null ? options.scale : computeScale(width);
+  const margin = options.margin || 0;
+  const matte = options.matte || '#FFFFFF';
 
-  // Composite SVG onto image
-  await sharp(inputPath)
-    .composite([{
-      input: Buffer.from(svg),
-      top: 0,
-      left: 0
-    }])
-    .toFile(outputPath);
+  // Build SVG overlay (sized to include any margin padding)
+  const svg = buildSvg(width, height, annotations, options.theme, { scale, margin });
 
+  // Optionally pad the canvas so gutter callouts/markers are never clipped
+  let pipeline = sharp(inputPath);
+  if (margin > 0) {
+    pipeline = pipeline.extend({
+      top: margin, bottom: margin, left: margin, right: margin,
+      background: matte
+    });
+  }
+
+  // Composite annotations onto the screenshot (keep as a buffer for post-steps)
+  let buf = await pipeline
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  // Optional premium frame (rounded corners + drop shadow + browser chrome)
+  if (options.frame) {
+    const frameOpts = typeof options.frame === 'object' ? options.frame : {};
+    buf = await frameImage(buf, { scale, ...frameOpts });
+  }
+
+  // Optional downscale for crisp web delivery (e.g. 0.5 turns a 2x capture to 1x)
+  if (options.downscale && options.downscale > 0 && options.downscale !== 1) {
+    const m = await sharp(buf).metadata();
+    buf = await sharp(buf)
+      .resize({ width: Math.round(m.width * options.downscale) })
+      .png()
+      .toBuffer();
+  }
+
+  // Encode to the requested format
+  const out = await encodeOutput(buf, options);
+  await out.toFile(outputPath);
+
+  const finalMeta = await sharp(buf).metadata();
   return {
     outputPath,
-    width,
-    height,
-    annotationCount: annotations.length
+    width: finalMeta.width,
+    height: finalMeta.height,
+    annotationCount: annotations.length,
+    scale
   };
+}
+
+/**
+ * Encode a buffer to the requested output format (png | webp | jpeg).
+ */
+function encodeOutput(buf, options = {}) {
+  const fmt = (options.format || '').toLowerCase();
+  const quality = options.quality || 90;
+  const s = sharp(buf);
+  if (fmt === 'webp') return s.webp({ quality });
+  if (fmt === 'jpeg' || fmt === 'jpg') return s.flatten({ background: '#FFFFFF' }).jpeg({ quality });
+  return s.png();
+}
+
+/**
+ * Wrap a (composited) screenshot in a premium frame: optional browser chrome,
+ * rounded corners, soft drop shadow, and padding on a matte background.
+ * Returns a PNG buffer.
+ */
+async function frameImage(inputBuffer, opts = {}) {
+  const {
+    padding = 64,
+    background = '#EEF1F5',
+    radius = 14,
+    shadow = true,
+    shadowBlur = 30,
+    shadowOpacity = 0.28,
+    shadowOffset = 10,
+    browserBar = false,
+    barColor = '#E7EAF0',
+    scale = 1
+  } = opts;
+
+  const meta = await sharp(inputBuffer).metadata();
+  const width = meta.width;
+  const height = meta.height;
+  const pad = Math.round(padding * scale);
+  const r = Math.round(radius * scale);
+  const barH = browserBar ? Math.round(38 * scale) : 0;
+  const cardW = width;
+  const cardH = height + barH;
+
+  // Build the card (optional browser bar above the screenshot)
+  let cardBuf;
+  if (browserBar) {
+    const dots = [0, 1, 2]
+      .map(i => `<circle cx="${20 * scale + i * 22 * scale}" cy="${barH / 2}" r="${6 * scale}" fill="${['#FF5F57', '#FEBC2E', '#28C840'][i]}"/>`)
+      .join('');
+    const barSvg = Buffer.from(
+      `<svg width="${cardW}" height="${barH}" xmlns="http://www.w3.org/2000/svg"><rect width="${cardW}" height="${barH}" fill="${barColor}"/>${dots}</svg>`
+    );
+    cardBuf = await sharp({ create: { width: cardW, height: cardH, channels: 4, background: '#FFFFFF' } })
+      .composite([{ input: barSvg, top: 0, left: 0 }, { input: inputBuffer, top: barH, left: 0 }])
+      .png()
+      .toBuffer();
+  } else {
+    cardBuf = inputBuffer;
+  }
+
+  // Round the card corners (dest-in keeps only what's inside the rounded rect)
+  const roundMask = Buffer.from(
+    `<svg width="${cardW}" height="${cardH}" xmlns="http://www.w3.org/2000/svg"><rect width="${cardW}" height="${cardH}" rx="${r}" ry="${r}"/></svg>`
+  );
+  const rounded = await sharp(cardBuf)
+    .composite([{ input: roundMask, blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+
+  const outW = cardW + pad * 2;
+  const outH = cardH + pad * 2;
+  const layers = [];
+
+  if (shadow) {
+    const shSvg = Buffer.from(
+      `<svg width="${outW}" height="${outH}" xmlns="http://www.w3.org/2000/svg"><rect x="${pad}" y="${pad + Math.round(shadowOffset * scale)}" width="${cardW}" height="${cardH}" rx="${r}" fill="black" opacity="${shadowOpacity}"/></svg>`
+    );
+    const shadowBuf = await sharp(shSvg).blur(Math.max(0.3, shadowBlur * scale)).png().toBuffer();
+    layers.push({ input: shadowBuf, top: 0, left: 0 });
+  }
+  layers.push({ input: rounded, top: pad, left: pad });
+
+  return await sharp({ create: { width: outW, height: outH, channels: 4, background } })
+    .composite(layers)
+    .png()
+    .toBuffer();
 }
 
 /**
@@ -769,8 +1009,10 @@ Example:
 // Export for programmatic use
 module.exports = {
   annotateImage,
+  frameImage,
   buildSvg,
   getImageDimensions,
+  computeScale,
   COLORS,
   THEMES
 };
