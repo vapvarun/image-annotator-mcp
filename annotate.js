@@ -593,6 +593,53 @@ function createIcon({ x, y, icon, color = 'green', size = 28, shadow = true, sca
 }
 
 /**
+ * Create a spotlight: dim the whole screenshot and cut a soft hole around the
+ * target so the reader's eye lands exactly where you want. Place this FIRST in
+ * the annotations array so markers/labels render on top of the dimmed area.
+ *
+ * Geometry: pass `target: [x,y]` (+ optional radius/width/height) for a centered
+ * hole, or x/y/width/height (top-left rect, like the rect annotation).
+ */
+function createSpotlight({ target, x, y, width, height, radius, shape = 'rect', dim = 0.6, color = '#0B1020', padding = 18, cornerRadius = 14, feather = 10, scale = 1 }) {
+  const id = generateId('spotlight');
+  const c = getColor(color);
+  const pad = padding * scale;
+  const fr = Math.max(0.1, feather * scale);
+
+  let cx = x;
+  let cy = y;
+  if (target) { cx = target[0]; cy = target[1]; }
+
+  let hole;
+  if (shape === 'ellipse' || shape === 'circle') {
+    const rx = (radius != null ? radius : (width || 90) / 2) + pad;
+    const ry = (radius != null ? radius : (height || width || 90) / 2) + pad;
+    hole = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="black"/>`;
+  } else {
+    // Rectangle hole. With `target`, center it; otherwise treat x/y as top-left.
+    const w = (width || 140) + pad * 2;
+    const h = (height || 70) + pad * 2;
+    const left = target ? cx - w / 2 : (x != null ? x - pad : cx - w / 2);
+    const top = target ? cy - h / 2 : (y != null ? y - pad : cy - h / 2);
+    hole = `<rect x="${left}" y="${top}" width="${w}" height="${h}" rx="${cornerRadius * scale}" fill="black"/>`;
+  }
+
+  const maskId = `${id}-mask`;
+  // A huge rect covers the whole canvas regardless of image size; the blurred
+  // black hole subtracts the spotlight area from the dim overlay.
+  const cover = `x="-99999" y="-99999" width="999999" height="999999"`;
+  const defs = `
+    <filter id="${id}-feather"><feGaussianBlur stdDeviation="${fr}"/></filter>
+    <mask id="${maskId}">
+      <rect ${cover} fill="white"/>
+      <g filter="url(#${id}-feather)">${hole}</g>
+    </mask>`;
+  const element = `<rect ${cover} fill="${c}" opacity="${dim}" mask="url(#${maskId})"/>`;
+
+  return { defs, element };
+}
+
+/**
  * Adjust color brightness
  */
 function adjustColor(hex, amount) {
@@ -669,6 +716,10 @@ function buildSvg(width, height, annotations, theme = null, opts = {}) {
       case 'icon':
         result = createIcon(mergedAnn);
         break;
+      case 'spotlight':
+      case 'focus':
+        result = createSpotlight(mergedAnn);
+        break;
       default:
         console.warn(`Unknown annotation type: ${ann.type}`);
         continue;
@@ -727,22 +778,124 @@ async function annotateImage(inputPath, outputPath, annotations, options = {}) {
     });
   }
 
-  // Composite SVG onto image
-  await pipeline
-    .composite([{
-      input: Buffer.from(svg),
-      top: 0,
-      left: 0
-    }])
-    .toFile(outputPath);
+  // Composite annotations onto the screenshot (keep as a buffer for post-steps)
+  let buf = await pipeline
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
 
+  // Optional premium frame (rounded corners + drop shadow + browser chrome)
+  if (options.frame) {
+    const frameOpts = typeof options.frame === 'object' ? options.frame : {};
+    buf = await frameImage(buf, { scale, ...frameOpts });
+  }
+
+  // Optional downscale for crisp web delivery (e.g. 0.5 turns a 2x capture to 1x)
+  if (options.downscale && options.downscale > 0 && options.downscale !== 1) {
+    const m = await sharp(buf).metadata();
+    buf = await sharp(buf)
+      .resize({ width: Math.round(m.width * options.downscale) })
+      .png()
+      .toBuffer();
+  }
+
+  // Encode to the requested format
+  const out = await encodeOutput(buf, options);
+  await out.toFile(outputPath);
+
+  const finalMeta = await sharp(buf).metadata();
   return {
     outputPath,
-    width: width + margin * 2,
-    height: height + margin * 2,
+    width: finalMeta.width,
+    height: finalMeta.height,
     annotationCount: annotations.length,
     scale
   };
+}
+
+/**
+ * Encode a buffer to the requested output format (png | webp | jpeg).
+ */
+function encodeOutput(buf, options = {}) {
+  const fmt = (options.format || '').toLowerCase();
+  const quality = options.quality || 90;
+  const s = sharp(buf);
+  if (fmt === 'webp') return s.webp({ quality });
+  if (fmt === 'jpeg' || fmt === 'jpg') return s.flatten({ background: '#FFFFFF' }).jpeg({ quality });
+  return s.png();
+}
+
+/**
+ * Wrap a (composited) screenshot in a premium frame: optional browser chrome,
+ * rounded corners, soft drop shadow, and padding on a matte background.
+ * Returns a PNG buffer.
+ */
+async function frameImage(inputBuffer, opts = {}) {
+  const {
+    padding = 64,
+    background = '#EEF1F5',
+    radius = 14,
+    shadow = true,
+    shadowBlur = 30,
+    shadowOpacity = 0.28,
+    shadowOffset = 10,
+    browserBar = false,
+    barColor = '#E7EAF0',
+    scale = 1
+  } = opts;
+
+  const meta = await sharp(inputBuffer).metadata();
+  const width = meta.width;
+  const height = meta.height;
+  const pad = Math.round(padding * scale);
+  const r = Math.round(radius * scale);
+  const barH = browserBar ? Math.round(38 * scale) : 0;
+  const cardW = width;
+  const cardH = height + barH;
+
+  // Build the card (optional browser bar above the screenshot)
+  let cardBuf;
+  if (browserBar) {
+    const dots = [0, 1, 2]
+      .map(i => `<circle cx="${20 * scale + i * 22 * scale}" cy="${barH / 2}" r="${6 * scale}" fill="${['#FF5F57', '#FEBC2E', '#28C840'][i]}"/>`)
+      .join('');
+    const barSvg = Buffer.from(
+      `<svg width="${cardW}" height="${barH}" xmlns="http://www.w3.org/2000/svg"><rect width="${cardW}" height="${barH}" fill="${barColor}"/>${dots}</svg>`
+    );
+    cardBuf = await sharp({ create: { width: cardW, height: cardH, channels: 4, background: '#FFFFFF' } })
+      .composite([{ input: barSvg, top: 0, left: 0 }, { input: inputBuffer, top: barH, left: 0 }])
+      .png()
+      .toBuffer();
+  } else {
+    cardBuf = inputBuffer;
+  }
+
+  // Round the card corners (dest-in keeps only what's inside the rounded rect)
+  const roundMask = Buffer.from(
+    `<svg width="${cardW}" height="${cardH}" xmlns="http://www.w3.org/2000/svg"><rect width="${cardW}" height="${cardH}" rx="${r}" ry="${r}"/></svg>`
+  );
+  const rounded = await sharp(cardBuf)
+    .composite([{ input: roundMask, blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+
+  const outW = cardW + pad * 2;
+  const outH = cardH + pad * 2;
+  const layers = [];
+
+  if (shadow) {
+    const shSvg = Buffer.from(
+      `<svg width="${outW}" height="${outH}" xmlns="http://www.w3.org/2000/svg"><rect x="${pad}" y="${pad + Math.round(shadowOffset * scale)}" width="${cardW}" height="${cardH}" rx="${r}" fill="black" opacity="${shadowOpacity}"/></svg>`
+    );
+    const shadowBuf = await sharp(shSvg).blur(Math.max(0.3, shadowBlur * scale)).png().toBuffer();
+    layers.push({ input: shadowBuf, top: 0, left: 0 });
+  }
+  layers.push({ input: rounded, top: pad, left: pad });
+
+  return await sharp({ create: { width: outW, height: outH, channels: 4, background } })
+    .composite(layers)
+    .png()
+    .toBuffer();
 }
 
 /**
@@ -856,6 +1009,7 @@ Example:
 // Export for programmatic use
 module.exports = {
   annotateImage,
+  frameImage,
   buildSvg,
   getImageDimensions,
   computeScale,

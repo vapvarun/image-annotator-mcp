@@ -21,7 +21,8 @@ const path = require('path');
 const fs = require('fs');
 
 // Import annotation functions
-const { annotateImage, getImageDimensions, COLORS, THEMES } = require('./annotate.js');
+const sharp = require('sharp');
+const { annotateImage, frameImage, getImageDimensions, computeScale, COLORS, THEMES } = require('./annotate.js');
 
 // Tool definitions
 const tools = [
@@ -41,6 +42,7 @@ Annotation types available:
 • blur - Blur sensitive content
 • connector - Dashed lines between elements
 • icon - Icon badges (check, x, warning, info, question)
+• spotlight - Dim the whole screenshot and softly highlight one area (place FIRST)
 
 Themes: documentation, tutorial, bugReport, highlight
 
@@ -53,6 +55,9 @@ PREMIUM TIPS for clean docs:
 • To avoid covering the UI, give a marker a "target": [x,y] of the element and let it
   sit in a clear area — it draws a leader line to the target automatically.
 • Set "margin" (e.g. 60) to pad the canvas so edge callouts/labels are never clipped.
+• Add a "spotlight" annotation FIRST to dim everything but the focus area.
+• Set "frame": { "browserBar": true } for a rounded browser chrome + drop shadow.
+• "format": "webp" + "downscale": 0.6 give crisp, light images for docs sites.
 • Text now uses a clean professional font by default (no handwriting).`,
     inputSchema: {
       type: 'object',
@@ -82,6 +87,30 @@ PREMIUM TIPS for clean docs:
           type: 'string',
           description: 'Background color for the margin area (hex or color name). Default white.'
         },
+        frame: {
+          type: 'object',
+          description: 'Wrap the result in a premium frame. Pass {} for defaults or customize.',
+          properties: {
+            browserBar: { type: 'boolean', description: 'Add a browser title bar with traffic-light dots' },
+            padding: { type: 'number', description: 'Padding around the screenshot (default 64)' },
+            background: { type: 'string', description: 'Matte color behind the frame (default #EEF1F5)' },
+            radius: { type: 'number', description: 'Corner radius (default 14)' },
+            shadow: { type: 'boolean', description: 'Drop shadow (default true)' }
+          }
+        },
+        format: {
+          type: 'string',
+          enum: ['png', 'webp', 'jpeg', 'jpg'],
+          description: 'Output format. Default png (or inferred from output_path extension).'
+        },
+        quality: {
+          type: 'number',
+          description: 'Quality (1-100) for webp/jpeg. Default 90.'
+        },
+        downscale: {
+          type: 'number',
+          description: 'Resize factor for the final image, e.g. 0.5 halves a 2x capture. Default 1 (no resize).'
+        },
         annotations: {
           type: 'array',
           description: 'Array of annotation objects',
@@ -90,7 +119,7 @@ PREMIUM TIPS for clean docs:
             properties: {
               type: {
                 type: 'string',
-                enum: ['marker', 'arrow', 'curved-arrow', 'callout', 'rect', 'circle', 'label', 'highlight', 'blur', 'connector', 'icon'],
+                enum: ['marker', 'arrow', 'curved-arrow', 'callout', 'rect', 'circle', 'label', 'highlight', 'blur', 'connector', 'icon', 'spotlight'],
                 description: 'Annotation type'
               },
               x: { type: 'number', description: 'X coordinate' },
@@ -116,7 +145,10 @@ PREMIUM TIPS for clean docs:
               shadow: { type: 'boolean' },
               curve: { type: 'number' },
               cornerRadius: { type: 'number' },
-              opacity: { type: 'number' }
+              opacity: { type: 'number' },
+              shape: { type: 'string', enum: ['rect', 'ellipse', 'circle'], description: 'Spotlight only: hole shape (default rect)' },
+              dim: { type: 'number', description: 'Spotlight only: darkness of the dimmed area 0-1 (default 0.6)' },
+              feather: { type: 'number', description: 'Spotlight only: softness of the spotlight edge (default 10)' }
             },
             required: ['type']
           }
@@ -248,6 +280,28 @@ Perfect for tutorials and documentation.`,
       },
       required: ['input_path', 'x', 'y', 'width', 'height']
     }
+  },
+  {
+    name: 'frame_screenshot',
+    description: `Wrap a screenshot in a premium frame for docs: rounded corners, soft drop shadow,
+padding on a matte background, and an optional browser title bar with traffic-light dots.
+Use on a raw or already-annotated screenshot. Supports webp/jpeg output and downscale.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input_path: { type: 'string' },
+        output_path: { type: 'string' },
+        browser_bar: { type: 'boolean', description: 'Add a browser title bar with traffic-light dots' },
+        padding: { type: 'number', description: 'Padding around the screenshot (default 64)' },
+        background: { type: 'string', description: 'Matte color behind the frame (default #EEF1F5)' },
+        radius: { type: 'number', description: 'Corner radius (default 14)' },
+        shadow: { type: 'boolean', description: 'Drop shadow (default true)' },
+        format: { type: 'string', enum: ['png', 'webp', 'jpeg', 'jpg'], description: 'Output format (default png)' },
+        quality: { type: 'number', description: 'Quality 1-100 for webp/jpeg (default 90)' },
+        downscale: { type: 'number', description: 'Resize factor, e.g. 0.6 (default 1)' }
+      },
+      required: ['input_path']
+    }
   }
 ];
 
@@ -255,7 +309,7 @@ Perfect for tutorials and documentation.`,
 const server = new Server(
   {
     name: 'image-annotator',
-    version: '1.1.0',
+    version: '1.2.0',
   },
   {
     capabilities: {
@@ -285,6 +339,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return await handleCallout(args);
       case 'blur_area':
         return await handleBlur(args);
+      case 'frame_screenshot':
+        return await handleFrame(args);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -306,19 +362,26 @@ function getOutputPath(inputPath, suffix = '-annotated') {
 
 // Handlers
 async function handleAnnotate(args) {
-  const { input_path, output_path, annotations, theme, scale, margin, matte } = args;
+  const { input_path, output_path, annotations, theme, scale, margin, matte, frame, format, quality, downscale } = args;
 
   if (!fs.existsSync(input_path)) {
     throw new Error(`File not found: ${input_path}`);
   }
 
-  const finalPath = output_path || getOutputPath(input_path);
-  const result = await annotateImage(input_path, finalPath, annotations, { theme, scale, margin, matte });
+  let finalPath = output_path || getOutputPath(input_path);
+  // If a non-PNG format is requested but the output path doesn't match, fix the extension.
+  if (format && !output_path) {
+    finalPath = getOutputPath(input_path).replace(/\.[^.]+$/, `.${format === 'jpg' ? 'jpg' : format}`);
+  }
+
+  const result = await annotateImage(input_path, finalPath, annotations, {
+    theme, scale, margin, matte, frame, format, quality, downscale
+  });
 
   return {
     content: [{
       type: 'text',
-      text: `✓ Annotated screenshot saved: ${result.outputPath}\n  Size: ${result.width}x${result.height}\n  Annotations: ${result.annotationCount}\n  Scale: ${result.scale}x${theme ? `\n  Theme: ${theme}` : ''}`
+      text: `✓ Annotated screenshot saved: ${result.outputPath}\n  Size: ${result.width}x${result.height}\n  Annotations: ${result.annotationCount}\n  Scale: ${result.scale}x${theme ? `\n  Theme: ${theme}` : ''}${frame ? '\n  Frame: on' : ''}`
     }]
   };
 }
@@ -532,11 +595,54 @@ async function handleBlur(args) {
   };
 }
 
+async function handleFrame(args) {
+  const {
+    input_path, output_path, browser_bar = false, padding, background,
+    radius, shadow, format, quality, downscale
+  } = args;
+
+  if (!fs.existsSync(input_path)) {
+    throw new Error(`File not found: ${input_path}`);
+  }
+
+  const meta = await sharp(input_path).metadata();
+  const scale = computeScale(meta.width);
+
+  let buf = await frameImage(await sharp(input_path).png().toBuffer(), {
+    scale, browserBar: browser_bar, padding, background, radius, shadow
+  });
+
+  if (downscale && downscale > 0 && downscale !== 1) {
+    const m = await sharp(buf).metadata();
+    buf = await sharp(buf).resize({ width: Math.round(m.width * downscale) }).png().toBuffer();
+  }
+
+  let finalPath = output_path || getOutputPath(input_path, '-framed');
+  if (format && !output_path) {
+    finalPath = getOutputPath(input_path, '-framed').replace(/\.[^.]+$/, `.${format === 'jpg' ? 'jpg' : format}`);
+  }
+
+  const fmt = (format || '').toLowerCase();
+  let out = sharp(buf);
+  if (fmt === 'webp') out = out.webp({ quality: quality || 90 });
+  else if (fmt === 'jpeg' || fmt === 'jpg') out = out.flatten({ background: '#FFFFFF' }).jpeg({ quality: quality || 90 });
+  else out = out.png();
+  await out.toFile(finalPath);
+
+  const fm = await sharp(buf).metadata();
+  return {
+    content: [{
+      type: 'text',
+      text: `✓ Framed screenshot saved: ${finalPath}\n  Size: ${fm.width}x${fm.height}${browser_bar ? '\n  Browser bar: on' : ''}`
+    }]
+  };
+}
+
 // Start server
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Image Annotator MCP Server v1.1.0 running...');
+  console.error('Image Annotator MCP Server v1.2.0 running...');
 }
 
 main().catch((error) => {

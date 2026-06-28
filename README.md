@@ -6,10 +6,25 @@ Professional MCP server for annotating screenshots with markers, arrows, callout
 
 ## Features
 
-- **Multiple Annotation Types**: Markers, arrows, callouts, rectangles, circles, labels, highlights, blur, connectors, and icons
-- **Professional Styling**: Gradient markers with shadows, customizable colors and themes
+- **Multiple Annotation Types**: Markers, arrows, callouts, rectangles, circles, labels, highlights, blur, connectors, icons, and spotlight
+- **Premium, doc-ready output**: clean professional font (no handwriting), retina auto-scaling, marker leader lines that never cover the UI, text halos for legibility
+- **Spotlight focus**: dim the whole screenshot and softly highlight one area
+- **Screenshot framing**: rounded browser chrome + drop shadow + matte padding
+- **Output control**: PNG / WebP / JPEG, quality, and downscale for crisp web delivery
 - **Theme Support**: Pre-built themes for documentation, tutorials, bug reports, and highlights
-- **6 MCP Tools**: Different tools for different use cases
+- **7 MCP Tools**: Different tools for different use cases
+
+## What's new in 1.2.0 (premium quality)
+
+These defaults make output look like a real product doc out of the box:
+
+- **Clean font by default** — replaced the Comic Sans handwriting default with a professional `system-ui / SF Pro / Segoe UI / Roboto` stack. `handwriting` is now opt-in.
+- **Retina auto-scale** — annotation sizes scale to the image resolution automatically (override with `scale`).
+- **Non-covering markers** — give a marker a `target: [x, y]` and it sits in a clear area, drawing a leader line to the element instead of burying it.
+- **`spotlight` type** — `{ "type": "spotlight", "target": [x, y], "width": …, "height": … }` placed first dims everything else.
+- **`frame`** — `{ "frame": { "browserBar": true } }` wraps the result in rounded browser chrome with a soft shadow.
+- **`margin` / `matte`** — pad the canvas so edge callouts are never clipped.
+- **`format` / `quality` / `downscale`** — emit optimized WebP/JPEG and downscale 2x captures.
 
 ## Installation
 
@@ -71,6 +86,25 @@ Add a callout (speech bubble) pointing to a specific location.
 
 ### `blur_area`
 Blur a rectangular area to hide sensitive information.
+
+### `frame_screenshot`
+Wrap a raw or annotated screenshot in a premium frame: rounded corners, soft drop shadow, matte padding, and an optional browser title bar with traffic-light dots. Supports `format`, `quality`, and `downscale`.
+
+## Premium example
+
+```json
+{
+  "input_path": "/path/to/screenshot.png",
+  "theme": "documentation",
+  "frame": { "browserBar": true, "padding": 90, "background": "#E9EDF2" },
+  "downscale": 0.6,
+  "annotations": [
+    {"type": "spotlight", "target": [1010, 627], "width": 1700, "height": 120, "dim": 0.62},
+    {"type": "marker", "number": 1, "target": [1010, 627], "offset": [-80, -110]},
+    {"type": "callout", "x": 1010, "y": 430, "text": "Open the Library tab", "pointer": "bottom", "color": "primary"}
+  ]
+}
+```
 
 ## Usage Example
 

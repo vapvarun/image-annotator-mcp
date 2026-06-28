@@ -1,6 +1,6 @@
 {
   "name": "image-annotator-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Professional MCP server for annotating screenshots with markers, arrows, callouts, and more. Works seamlessly with Playwright MCP for documentation workflows.",
   "main": "server.js",
   "bin": {
