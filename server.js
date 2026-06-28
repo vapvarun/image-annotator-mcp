@@ -46,7 +46,14 @@ Themes: documentation, tutorial, bugReport, highlight
 
 Colors: red, orange, yellow, green, blue, purple, pink, cyan, teal,
         white, black, gray, lightGray, darkGray,
-        success, warning, error, info, primary, secondary, accent`,
+        success, warning, error, info, primary, secondary, accent
+
+PREMIUM TIPS for clean docs:
+• Markers auto-size to the screenshot resolution (retina-aware). Pass "scale" to override.
+• To avoid covering the UI, give a marker a "target": [x,y] of the element and let it
+  sit in a clear area — it draws a leader line to the target automatically.
+• Set "margin" (e.g. 60) to pad the canvas so edge callouts/labels are never clipped.
+• Text now uses a clean professional font by default (no handwriting).`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -62,6 +69,18 @@ Colors: red, orange, yellow, green, blue, purple, pink, cyan, teal,
           type: 'string',
           enum: ['documentation', 'tutorial', 'bugReport', 'highlight'],
           description: 'Apply a preset theme for consistent styling'
+        },
+        scale: {
+          type: 'number',
+          description: 'Annotation size multiplier. Omit to auto-scale from image width (retina-aware). Use 1 for raw sizes.'
+        },
+        margin: {
+          type: 'number',
+          description: 'Padding (px) added around the screenshot so gutter callouts/markers are not clipped. Default 0.'
+        },
+        matte: {
+          type: 'string',
+          description: 'Background color for the margin area (hex or color name). Default white.'
         },
         annotations: {
           type: 'array',
@@ -80,6 +99,9 @@ Colors: red, orange, yellow, green, blue, purple, pink, cyan, teal,
               text: { type: 'string', description: 'Text for labels/callouts' },
               from: { type: 'array', items: { type: 'number' }, description: '[x, y] start point' },
               to: { type: 'array', items: { type: 'number' }, description: '[x, y] end point' },
+              target: { type: 'array', items: { type: 'number' }, description: 'Marker only: [x, y] of the UI element to point at. Marker offsets into a clear area and draws a leader to this point.' },
+              offset: { type: 'array', items: { type: 'number' }, description: 'Marker only: [dx, dy] offset from target for the badge. Defaults to up-left.' },
+              leader: { type: 'boolean', description: 'Marker only: draw a leader line from badge to target (default true).' },
               width: { type: 'number' },
               height: { type: 'number' },
               radius: { type: 'number' },
@@ -233,7 +255,7 @@ Perfect for tutorials and documentation.`,
 const server = new Server(
   {
     name: 'image-annotator',
-    version: '1.0.0',
+    version: '1.1.0',
   },
   {
     capabilities: {
@@ -284,19 +306,19 @@ function getOutputPath(inputPath, suffix = '-annotated') {
 
 // Handlers
 async function handleAnnotate(args) {
-  const { input_path, output_path, annotations, theme } = args;
+  const { input_path, output_path, annotations, theme, scale, margin, matte } = args;
 
   if (!fs.existsSync(input_path)) {
     throw new Error(`File not found: ${input_path}`);
   }
 
   const finalPath = output_path || getOutputPath(input_path);
-  const result = await annotateImage(input_path, finalPath, annotations, { theme });
+  const result = await annotateImage(input_path, finalPath, annotations, { theme, scale, margin, matte });
 
   return {
     content: [{
       type: 'text',
-      text: `✓ Annotated screenshot saved: ${result.outputPath}\n  Size: ${result.width}x${result.height}\n  Annotations: ${result.annotationCount}${theme ? `\n  Theme: ${theme}` : ''}`
+      text: `✓ Annotated screenshot saved: ${result.outputPath}\n  Size: ${result.width}x${result.height}\n  Annotations: ${result.annotationCount}\n  Scale: ${result.scale}x${theme ? `\n  Theme: ${theme}` : ''}`
     }]
   };
 }
@@ -514,7 +536,7 @@ async function handleBlur(args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Image Annotator MCP Server v1.0.0 running...');
+  console.error('Image Annotator MCP Server v1.1.0 running...');
 }
 
 main().catch((error) => {
